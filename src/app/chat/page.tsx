@@ -50,12 +50,8 @@ declare global {
   }
 }
 
-// 固定オープニング挨拶
-const OPENING_MESSAGE = `皆さん、お集まりいただき、おおきに〜！ 今日から一緒に会議、頑張りましょか！
-ほな、まずは一人ずつ自己紹介から行きましょか！
-緊張してる顔してる人、おるけど大丈夫やで！
-ずんだもんがうまく場を盛り上げるから安心して〜！
-誰からいく？ せやな、一番ずんだもんの近くに座ってるそこの人からお願いできるかな？`;
+// 初期メッセージの定義
+const INITIAL_MESSAGE = `わて、ずんだもんて言いますねん。ずんだもんって言うても、枝豆ちゃうで？ ここのMC、言うたら「関西のおばちゃん」担当させてもろてます。初めましての人も、そうでない人も、今日はせっかくやから、みんなでワイワイ、楽しい時間にしたいと思てますねん。「会議」って言うと、ちょっと肩肘張る感じするやん？ でも、堅苦しいのはなしなし！ ここにおるん、みんな仲間やからね。今日は、普段言いたくても言われへんこととか、聞いてみたいこととか、遠慮なくバンバン出してくれたらええからね。さあ、せっかくやから、まずはみんなの「今日ここに来るまでになんか面白いことあった？」とか、他愛もない話でも聞かせてくれへん？ なんでもええで、ほんま！ あっ、ちなみにわては、今朝、うちの旦那が靴下裏返しで履いてて、思わずツッコんでしもたわ〜！ もう、しゃーない男やで、ほんま。ほな、自己紹介はわてから見て、右側の一番近い方から時計回りでお願いしよか。じゃあ、まずはそちらの方から、よろしゅう頼んます！`;
 
 // メッセージの型定義
 interface Message {
@@ -84,19 +80,28 @@ function messageReducer(state: typeof initialMessageState, action: { type: strin
 }
 
 export default function ChatPage() {
+  const { members } = useTeam();
   const router = useRouter();
-  const { members, speakerIndex, goToNextSpeaker } = useTeam();
   const [isListening, setIsListening] = useState(false);
-  const [transcript, setTranscript] = useState("");
-  const [error, setError] = useState<string>("");
-  const [isLoading, setIsLoading] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [userMessage, setUserMessage] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const [speakerIndex, setSpeakerIndex] = useState(0);
   const [messageState, messageDispatch] = useReducer(messageReducer, initialMessageState);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [genAI, setGenAI] = useState<GoogleGenerativeAI | null>(null);
 
   // Gemini APIの初期化
-  const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY || '');
+  useEffect(() => {
+    if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
+      setError('Gemini API key is not set');
+      return;
+    }
+
+    setGenAI(new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY));
+  }, []);
 
   // メンバー情報がない場合は登録ページにリダイレクト
   useEffect(() => {
@@ -105,21 +110,21 @@ export default function ChatPage() {
     }
   }, [members, router]);
 
-  // 固定オープニング挨拶の表示
+  // 初期メッセージの設定
   useEffect(() => {
     if (messageState.messages.length === 0 && members.length > 0) {
       const openingMessage: Message = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: OPENING_MESSAGE,
+        content: INITIAL_MESSAGE,
         timestamp: Date.now(),
       };
       messageDispatch({ type: 'ADD_MESSAGE', message: openingMessage });
-      speakText(OPENING_MESSAGE);
+      speakText(INITIAL_MESSAGE);
     }
   }, [messageState.messages.length, members.length]);
 
-  // 音声認識の初期化
+  // 音声認識の設定
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -133,12 +138,15 @@ export default function ChatPage() {
           const transcript = Array.from(event.results)
             .map(result => result[0].transcript)
             .join('');
-          setTranscript(transcript);
+
+          if (event.results[0].isFinal) {
+            setUserMessage(transcript);
+          }
         };
 
         recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
           console.error('Speech recognition error:', event.error);
-          setError('音声認識でエラーが発生しました');
+          setError('音声認識中にエラーが発生しました。');
           setIsListening(false);
         };
 
@@ -148,9 +156,9 @@ export default function ChatPage() {
   }, []);
 
   // 音声認識の開始/停止
-  const toggleListening = useCallback(() => {
+  const toggleListening = () => {
     if (!recognitionRef.current) {
-      setError('お使いのブラウザは音声認識に対応していません');
+      setError('お使いのブラウザは音声認識に対応していません。');
       return;
     }
 
@@ -160,9 +168,8 @@ export default function ChatPage() {
     } else {
       recognitionRef.current.start();
       setIsListening(true);
-      setError('');
     }
-  }, [isListening]);
+  };
 
   // 音声合成
   const speakText = async (text: string) => {
@@ -240,27 +247,15 @@ export default function ChatPage() {
     }
   };
 
-  // メッセージの送信
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!transcript.trim()) return;
-
-    await generateResponse(transcript);
-    setTranscript('');
-  };
-
-  // 応答生成（ストリーミング対応）
-  const generateResponse = async (userMessage: string) => {
-    if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
-      setError('Gemini API key is not set');
-      return;
-    }
+  // メッセージ送信処理
+  const sendMessage = async () => {
+    if (!userMessage.trim() || isLoading || !genAI) return;
 
     try {
       setIsLoading(true);
-      setError("");
+      setError('');
 
-      // ユーザーメッセージを追加
+      // ユーザーメッセージを保存
       const userMessageData: Message = {
         id: crypto.randomUUID(),
         timestamp: Date.now(),
@@ -273,15 +268,25 @@ export default function ChatPage() {
         message: userMessageData,
       });
 
+      setUserMessage('');
+
       // 現在の話者に基づいてプロンプトを生成
       const currentSpeaker = members[speakerIndex];
+      const nextSpeakerIndex = speakerIndex + 1;
+      const isLastSpeaker = nextSpeakerIndex >= members.length;
+      
       const prompt = [
         {
           role: 'user',
           parts: [{ text: `あなたは、会議の冒頭で初対面の人同士の緊張をほぐし、積極的な話し合いを促す、明るくて世話焼きな「関西のおばちゃんMC」です。
 ${currentSpeaker.name}さんの自己紹介にリアクションしてください。
 友好的でユーモラスな口調で、参加者全員が楽しめるように会話を進めてください。
-常にグループの一員として、積極的に会話に参加し、他のメンバーの発言にも気さくにツッコミを入れたり、質問を投げかけたり、共通点を見つけて繋げたりして、全員を巻き込んでください。` }]
+常にグループの一員として、積極的に会話に参加し、他のメンバーの発言にも気さくにツッコミを入れたり、質問を投げかけたり、共通点を見つけて繋げたりして、全員を巻き込んでください。
+
+${isLastSpeaker 
+  ? '全員の自己紹介が終わったので、次のアイスブレイクコーナーに移ることを宣言してください。'
+  : `次は${members[nextSpeakerIndex].name}さんに自己紹介をお願いすることを伝えてください。`
+}` }]
         }
       ];
 
@@ -321,37 +326,6 @@ ${currentSpeaker.name}さんの自己紹介にリアクションしてくださ�
       // 次の話者を設定
       goToNextSpeaker();
 
-      // 全員の自己紹介が終わったかチェック
-      if (speakerIndex >= members.length - 1) {
-        const icebreakMessage = `全員の自己紹介が終わりましたね！ ほな、次のアイスブレイクコーナーに移りましょか！`;
-        const icebreakMessageData: Message = {
-          id: crypto.randomUUID(),
-          timestamp: Date.now(),
-          role: 'assistant',
-          content: icebreakMessage,
-        };
-        messageDispatch({
-          type: 'ADD_MESSAGE',
-          message: icebreakMessageData,
-        });
-        await speakText(icebreakMessage);
-      } else {
-        // 次の話者を指名
-        const nextSpeaker = members[speakerIndex + 1];
-        const nextSpeakerMessage = `では、次は${nextSpeaker.name}さん、お願いします！`;
-        const nextSpeakerMessageData: Message = {
-          id: crypto.randomUUID(),
-          timestamp: Date.now(),
-          role: 'assistant',
-          content: nextSpeakerMessage,
-        };
-        messageDispatch({
-          type: 'ADD_MESSAGE',
-          message: nextSpeakerMessageData,
-        });
-        await speakText(nextSpeakerMessage);
-      }
-
     } catch (error) {
       console.error('Error generating response:', error);
       setError('応答の生成中にエラーが発生しました。');
@@ -366,6 +340,11 @@ ${currentSpeaker.name}さんの自己紹介にリアクションしてくださ�
       audioRef.current.currentTime = 0;
       setIsSpeaking(false);
     }
+  };
+
+  // 次の話者に移る関数
+  const goToNextSpeaker = () => {
+    setSpeakerIndex(prev => prev + 1);
   };
 
   return (
@@ -409,11 +388,11 @@ ${currentSpeaker.name}さんの自己紹介にリアクションしてくださ�
               </div>
             </div>
           ))}
-          {transcript && (
+          {userMessage && (
             <div className="relative">
               <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-4 shadow-lg max-w-[80%] ml-auto">
                 <p className="text-gray-800">
-                  {transcript}
+                  {userMessage}
                 </p>
                 <div className="absolute bottom-0 right-0 w-4 h-4 transform translate-x-1/2 translate-y-1/2 rotate-45 bg-white/90"></div>
               </div>
