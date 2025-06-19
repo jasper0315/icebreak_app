@@ -110,25 +110,31 @@ export default function ChatPage() {
     }
   }, [members, router]);
 
+  const [openingMessage, setOpeningMessage] = useState<Message>();
   // 初期メッセージの設定
   useEffect(() => {
     // membersが空配列でなければ初期化済みとみなす
+    const hasInitialMessage = messageState.messages.some(message => message.content === INITIAL_MESSAGE);
     if (
       members.length > 0 &&
-      (messageState.messages.length === 0 ||
-        messageState.messages[0].content !== INITIAL_MESSAGE)
+      (messageState.messages.length === 0 && !hasInitialMessage)
     ) {
-      const openingMessage: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: INITIAL_MESSAGE,
-        timestamp: Date.now(),
-      };
+      setOpeningMessage(
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: INITIAL_MESSAGE,
+          timestamp: Date.now(),});
+    }
+  }, [members]);
+
+  useEffect(() => {
+    if (openingMessage) {
       messageDispatch({ type: 'ADD_MESSAGE', message: openingMessage });
+      console.log('initial message', INITIAL_MESSAGE);
       speakText(INITIAL_MESSAGE);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [openingMessage]);
 
   // 音声認識の設定
   useEffect(() => {
@@ -369,7 +375,7 @@ ${isLastSpeaker
           </div>
         )}
         <div className="space-y-4 mb-4 max-h-[60vh] overflow-y-auto">
-          {messageState.messages.map((message) => (
+          {openingMessage && messageState.messages.map((message) => (
             <div key={message.id} className="relative">
               <div className={`rounded-2xl p-4 shadow-lg max-w-[80%] ${
                 message.role === 'assistant' 
