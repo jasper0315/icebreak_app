@@ -112,7 +112,12 @@ export default function ChatPage() {
 
   // 初期メッセージの設定
   useEffect(() => {
-    if (messageState.messages.length === 0 && members.length > 0) {
+    // membersが空配列でなければ初期化済みとみなす
+    if (
+      members.length > 0 &&
+      (messageState.messages.length === 0 ||
+        messageState.messages[0].content !== INITIAL_MESSAGE)
+    ) {
       const openingMessage: Message = {
         id: crypto.randomUUID(),
         role: 'assistant',
@@ -122,7 +127,8 @@ export default function ChatPage() {
       messageDispatch({ type: 'ADD_MESSAGE', message: openingMessage });
       speakText(INITIAL_MESSAGE);
     }
-  }, [messageState.messages.length, members.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 音声認識の設定
   useEffect(() => {
@@ -172,7 +178,7 @@ export default function ChatPage() {
   };
 
   // 音声合成
-  const speakText = async (text: string) => {
+const speakText = async (text: string) => {
     if (!text) return;
 
     try {
