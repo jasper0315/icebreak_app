@@ -2,10 +2,25 @@
 
 import Image from "next/image";
 import { useState, useEffect, useCallback, useRef, useReducer, useMemo } from "react";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+
 import superagent from 'superagent';
 import { useTeam } from '@/contexts/TeamContext';
 import { useRouter } from 'next/navigation';
+
+// Web Speech APIの型定義
+interface GoogleGenerativeAI {
+  getGenerativeModel: (config: { model: string }) => {
+    generateContentStream: (params: {
+      contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+      generationConfig: {
+        temperature: number;
+        topK: number;
+        topP: number;
+        maxOutputTokens: number;
+      };
+    }) => Promise<{ stream: AsyncIterable<{ text: () => string }> }>;
+  };
+}
 
 // Web Speech APIの型定義
 interface SpeechRecognition extends EventTarget {
@@ -93,14 +108,24 @@ export default function ChatPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [genAI, setGenAI] = useState<GoogleGenerativeAI | null>(null);
 
-  // Gemini APIの初期化
+  // Gemini APIの初期化（遅延読み込み）
   useEffect(() => {
-    if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
-      setError('Gemini API key is not set');
-      return;
-    }
+    const initializeGeminiAI = async () => {
+      if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
+        setError('Gemini API key is not set');
+        return;
+      }
 
-    setGenAI(new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY));
+      try {
+        const { GoogleGenerativeAI } = await import("@google/generative-ai");
+        setGenAI(new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY));
+      } catch (error) {
+        console.error('Failed to load GoogleGenerativeAI:', error);
+        setError('AI機能の読み込みに失敗しました');
+      }
+    };
+
+    initializeGeminiAI();
   }, []);
 
   // メンバー情報がない場合は登録ページにリダイレクト
@@ -473,4 +498,4 @@ ${isLastSpeaker
       <audio ref={audioRef} className="hidden" />
     </div>
   );
-}                                                            
+}                                                                                                                        

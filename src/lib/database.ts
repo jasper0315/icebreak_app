@@ -60,66 +60,84 @@ const docClient = DynamoDBDocumentClient.from(client);
 // テーブル名
 const TABLE_NAME = 'ChatHistory';
 
-// DynamoDBの接続を確認する関数
-async function verifyDynamoDBConnection() {
-  try {
-    console.log('Verifying DynamoDB connection...', {
-      region: envConfig.AWS_REGION,
-      hasAccessKey: !!envConfig.AWS_ACCESS_KEY_ID,
-      hasSecretKey: !!envConfig.AWS_SECRET_ACCESS_KEY,
-      timestamp: new Date().toISOString()
-    });
+let connectionVerified = false;
+let connectionPromise: Promise<boolean> | null = null;
 
-    const command = new DescribeTableCommand({
-      TableName: TABLE_NAME,
-    });
-
-    console.log('Attempting to connect to DynamoDB:', {
-      tableName: TABLE_NAME,
-      region: envConfig.AWS_REGION,
-      timestamp: new Date().toISOString()
-    });
-
-    const response = await client.send(command);
-    console.log('Successfully connected to DynamoDB:', {
-      tableName: TABLE_NAME,
-      tableStatus: response.Table?.TableStatus,
-      timestamp: new Date().toISOString()
-    });
+// DynamoDBの接続を確認する関数（キャッシュ付き）
+async function verifyDynamoDBConnection(): Promise<boolean> {
+  if (connectionVerified) {
     return true;
-  } catch (error) {
-    console.error('Failed to connect to DynamoDB:', {
-      error,
-      tableName: TABLE_NAME,
-      timestamp: new Date().toISOString(),
-      errorDetails: error instanceof Error ? {
-        name: error.name,
-        message: error.message,
-        stack: error.stack
-      } : error,
-      awsConfig: {
+  }
+
+  if (connectionPromise) {
+    return connectionPromise;
+  }
+
+  connectionPromise = (async () => {
+    try {
+      console.log('Verifying DynamoDB connection...', {
         region: envConfig.AWS_REGION,
         hasAccessKey: !!envConfig.AWS_ACCESS_KEY_ID,
-        hasSecretKey: !!envConfig.AWS_SECRET_ACCESS_KEY
-      }
-    });
+        hasSecretKey: !!envConfig.AWS_SECRET_ACCESS_KEY,
+        timestamp: new Date().toISOString()
+      });
 
-    if (error instanceof Error) {
-      if (error.message.includes('AccessDeniedException')) {
-        throw new Error('AWS認証情報の権限が不足しています。IAMポリシーを確認してください。');
-      } else if (error.message.includes('ResourceNotFoundException')) {
-        throw new Error(`DynamoDBテーブル "${TABLE_NAME}" が存在しません。テーブルを作成してください。`);
-      } else if (error.message.includes('InvalidSignatureException')) {
-        throw new Error('AWS認証情報が無効です。アクセスキーとシークレットキーを確認してください。');
-      } else if (error.message.includes('ExpiredTokenException')) {
-        throw new Error('AWS認証情報のトークンが期限切れです。新しい認証情報を設定してください。');
-      } else if (error.message.includes('Missing credentials')) {
-        throw new Error('AWS認証情報が設定されていません。.env.localファイルを確認してください。');
+      const command = new DescribeTableCommand({
+        TableName: TABLE_NAME,
+      });
+
+      console.log('Attempting to connect to DynamoDB:', {
+        tableName: TABLE_NAME,
+        region: envConfig.AWS_REGION,
+        timestamp: new Date().toISOString()
+      });
+
+      const response = await client.send(command);
+      console.log('Successfully connected to DynamoDB:', {
+        tableName: TABLE_NAME,
+        tableStatus: response.Table?.TableStatus,
+        timestamp: new Date().toISOString()
+      });
+      
+      connectionVerified = true;
+      return true;
+    } catch (error) {
+      connectionPromise = null; // Reset promise on error to allow retry
+      console.error('Failed to connect to DynamoDB:', {
+        error,
+        tableName: TABLE_NAME,
+        timestamp: new Date().toISOString(),
+        errorDetails: error instanceof Error ? {
+          name: error.name,
+          message: error.message,
+          stack: error.stack
+        } : error,
+        awsConfig: {
+          region: envConfig.AWS_REGION,
+          hasAccessKey: !!envConfig.AWS_ACCESS_KEY_ID,
+          hasSecretKey: !!envConfig.AWS_SECRET_ACCESS_KEY
+        }
+      });
+
+      if (error instanceof Error) {
+        if (error.message.includes('AccessDeniedException')) {
+          throw new Error('AWS認証情報の権限が不足しています。IAMポリシーを確認してください。');
+        } else if (error.message.includes('ResourceNotFoundException')) {
+          throw new Error(`DynamoDBテーブル "${TABLE_NAME}" が存在しません。テーブルを作成してください。`);
+        } else if (error.message.includes('InvalidSignatureException')) {
+          throw new Error('AWS認証情報が無効です。アクセスキーとシークレットキーを確認してください。');
+        } else if (error.message.includes('ExpiredTokenException')) {
+          throw new Error('AWS認証情報のトークンが期限切れです。新しい認証情報を設定してください。');
+        } else if (error.message.includes('Missing credentials')) {
+          throw new Error('AWS認証情報が設定されていません。.env.localファイルを確認してください。');
+        }
       }
+
+      throw new Error('DynamoDBへの接続に失敗しました。認証情報とテーブルの設定を確認してください。');
     }
+  })();
 
-    throw new Error('DynamoDBへの接続に失敗しました。認証情報とテーブルの設定を確認してください。');
-  }
+  return connectionPromise;
 }
 
 // メッセージの型定義
@@ -252,4 +270,4 @@ export async function endConversation(conversationId: string): Promise<void> {
     });
     throw new Error(`会話の終了に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
   }
-}  
+}    
