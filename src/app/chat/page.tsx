@@ -7,7 +7,7 @@ import superagent from 'superagent';
 import { useTeam } from '@/contexts/TeamContext';
 import { useRouter } from 'next/navigation';
 import { Message } from '@/lib/types';
-import { getPhaseInstruction, getNextPhase, generatePrompt } from '@/lib/prompts';
+import { getNextPhase, generatePrompt } from '@/lib/prompts';
 
 // Web Speech APIの型定義
 interface GoogleGenerativeAI {
@@ -303,19 +303,22 @@ export default function ChatPage() {
     }
   }, [userMessage, isLoading, genAI, messageState.messages, currentPhase, speakText, goToNextSpeaker, setCurrentPhase]);
 
-  // フェーズに基づく初期メッセージの設定
   useEffect(() => {
+    const INITIAL_MESSAGE = `て、ずんだもんて言いますねん。ずんだもんって言うても、枝豆ちゃうで？ ここのMC、言うたら「関西のおばちゃん」担当させてもろてます。初めましての人も、そうでない人も、今日はせっかくやから、みんなでワイワイ、楽しい時間にしたいと思てますねん。
+「会議」って言うと、ちょっと肩肘張る感じするやん？ でも、堅苦しいのはなしなし！ ここにおるん、みんな仲間やからね。今日は、普段言いたくても言われへんこととか、聞いてみたいこととか、遠慮なくバンバン出してくれたらええからね。
+さあ、せっかくやから、まずはみんなの「今日ここに来るまでになんか面白いことあった？」とか、他愛もない話でも聞かせてくれへん？ なんでもええで、ほんま！ あっ、ちなみにわては、今朝、うちの旦那が靴下裏返しで履いてて、思わずツッコんでしもたわ〜！ もう、しゃーない男やで、ほんま。
+ほな、自己紹介はわてから見て、右側の一番近い方から時計回りでお願いしよか。じゃあ、まずはそちらの方から、よろしゅう頼んます！`;
+
     if (members.length > 0 && messageState.messages.length === 0) {
-      const openingText = getPhaseInstruction(currentPhase);
       const openingMessage: Message = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: openingText,
+        content: INITIAL_MESSAGE,
         timestamp: Date.now(),
         phase: currentPhase,
       };
       messageDispatch({ type: 'ADD_MESSAGE', message: openingMessage });
-      speakText(openingText);
+      speakText(INITIAL_MESSAGE);
     }
   }, [members, messageState.messages, speakText, currentPhase]);
 
@@ -498,4 +501,4 @@ export default function ChatPage() {
       <audio ref={audioRef} className="hidden" />
     </div>
   );
-}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
