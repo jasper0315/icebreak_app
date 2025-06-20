@@ -2,7 +2,7 @@
 export interface SpeechRecognitionEvent extends Event {
   results: SpeechRecognitionResultList;
   resultIndex: number;
-  error: any;
+  error: string;
 }
 
 export interface SpeechRecognitionResultList {
@@ -31,4 +31,4 @@ export interface SpeechRecognition extends EventTarget {
   stop(): void;
   onresult: (event: SpeechRecognitionEvent) => void;
   onerror: (event: SpeechRecognitionEvent) => void;
-} 
+}  

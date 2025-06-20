@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 interface Member {
   name: string;
@@ -33,14 +33,23 @@ export function TeamProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // 状態の変更をlocalStorageに保存
+  const debouncedSave = useCallback((key: string, value: string) => {
+    const timeoutId = setTimeout(() => {
+      localStorage.setItem(key, value);
+    }, 300);
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  // 状態の変更をlocalStorageに保存（デバウンス付き）
   useEffect(() => {
-    localStorage.setItem('team_members', JSON.stringify(members));
-  }, [members]);
+    const cleanup = debouncedSave('team_members', JSON.stringify(members));
+    return cleanup;
+  }, [members, debouncedSave]);
 
   useEffect(() => {
-    localStorage.setItem('speaker_index', speakerIndex.toString());
-  }, [speakerIndex]);
+    const cleanup = debouncedSave('speaker_index', speakerIndex.toString());
+    return cleanup;
+  }, [speakerIndex, debouncedSave]);
 
   const initializeMembers = (newMembers: Member[]) => {
     setMembers(newMembers);
@@ -64,4 +73,4 @@ export function useTeam() {
     throw new Error('useTeam must be used within a TeamProvider');
   }
   return context;
-} 
+}  
