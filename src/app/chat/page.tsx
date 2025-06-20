@@ -6,6 +6,8 @@ import { useState, useEffect, useCallback, useRef, useReducer, useMemo } from "r
 import superagent from 'superagent';
 import { useTeam } from '@/contexts/TeamContext';
 import { useRouter } from 'next/navigation';
+import { Message, ConversationPhase } from '@/lib/types';
+import { generatePrompt, getNextPhase } from '@/lib/prompts';
 
 // Web Speech APIの型定義
 interface GoogleGenerativeAI {
@@ -68,13 +70,7 @@ declare global {
 // 初期メッセージの定義
 const INITIAL_MESSAGE = `わて、ずんだもんて言いますねん。ずんだもんって言うても、枝豆ちゃうで？ ここのMC、言うたら「関西のおばちゃん」担当させてもろてます。初めましての人も、そうでない人も、今日はせっかくやから、みんなでワイワイ、楽しい時間にしたいと思てますねん。「会議」って言うと、ちょっと肩肘張る感じするやん？ でも、堅苦しいのはなしなし！ ここにおるん、みんな仲間やからね。今日は、普段言いたくても言われへんこととか、聞いてみたいこととか、遠慮なくバンバン出してくれたらええからね。さあ、せっかくやから、まずはみんなの「今日ここに来るまでになんか面白いことあった？」とか、他愛もない話でも聞かせてくれへん？ なんでもええで、ほんま！ あっ、ちなみにわては、今朝、うちの旦那が靴下裏返しで履いてて、思わずツッコんでしもたわ〜！ もう、しゃーない男やで、ほんま。ほな、自己紹介はわてから見て、右側の一番近い方から時計回りでお願いしよか。じゃあ、まずはそちらの方から、よろしゅう頼んます！`;
 
-// メッセージの型定義
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-}
+
 
 // メッセージの初期状態
 const initialMessageState = {
@@ -95,7 +91,7 @@ function messageReducer(state: typeof initialMessageState, action: { type: strin
 }
 
 export default function ChatPage() {
-  const { members } = useTeam();
+  const { members, goToNextSpeaker } = useTeam();
   const router = useRouter();
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -103,10 +99,13 @@ export default function ChatPage() {
   const [error, setError] = useState('');
   const [userMessage, setUserMessage] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const [speakerIndex, setSpeakerIndex] = useState(0);
+
   const [messageState, messageDispatch] = useReducer(messageReducer, initialMessageState);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [genAI, setGenAI] = useState<GoogleGenerativeAI | null>(null);
+  const [currentPhase, setCurrentPhase] = useState<ConversationPhase>('intro_start');
+  const [streamingResponse, setStreamingResponse] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
 
   // Gemini APIの初期化（遅延読み込み）
   useEffect(() => {
@@ -135,10 +134,7 @@ export default function ChatPage() {
     }
   }, [members, router]);
 
-  // 次の話者に移る関数
-  const goToNextSpeaker = useCallback(() => {
-    setSpeakerIndex(prev => prev + 1);
-  }, []);
+
 
   // 音声合成
   const speakText = useCallback(async (text: string) => {
@@ -233,12 +229,12 @@ export default function ChatPage() {
       setIsLoading(true);
       setError('');
 
-      // ユーザーメッセージを保存
       const userMessageData: Message = {
         id: crypto.randomUUID(),
         timestamp: Date.now(),
         role: 'user',
         content: userMessage,
+        phase: currentPhase,
       };
 
       messageDispatch({
@@ -248,25 +244,7 @@ export default function ChatPage() {
 
       setUserMessage('');
 
-      // 現在の話者に基づいてプロンプトを生成
-      const currentSpeaker = members[speakerIndex];
-      const nextSpeakerIndex = speakerIndex + 1;
-      const isLastSpeaker = nextSpeakerIndex >= members.length;
-      
-      const prompt = [
-        {
-          role: 'user',
-          parts: [{ text: `あなたは、会議の冒頭で初対面の人同士の緊張をほぐし、積極的な話し合いを促す、明るくて世話焼きな「関西のおばちゃんMC」です。
-${currentSpeaker.name}さんの自己紹介にリアクションしてください。
-友好的でユーモラスな口調で、参加者全員が楽しめるように会話を進めてください。
-常にグループの一員として、積極的に会話に参加し、他のメンバーの発言にも気さくにツッコミを入れたり、質問を投げかけたり、共通点を見つけて繋げたりして、全員を巻き込んでください。
-
-${isLastSpeaker 
-  ? '全員の自己紹介が終わったので、次のアイスブレイクコーナーに移ることを宣言してください。'
-  : `次は${members[nextSpeakerIndex].name}さんに自己紹介をお願いすることを伝えてください。`
-}` }]
-        }
-      ];
+      const prompt = generatePrompt(messageState.messages, currentPhase);
 
       const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-preview-05-20" });
       const result = await model.generateContentStream({
@@ -279,18 +257,27 @@ ${isLastSpeaker
         },
       });
 
+      setIsStreaming(true);
+      setStreamingResponse('');
+
+      const assistantMessageId = crypto.randomUUID();
       let fullResponse = '';
+
       for await (const chunk of result.stream) {
         const chunkText = chunk.text();
         fullResponse += chunkText;
+        setStreamingResponse(fullResponse);
       }
+
+      setIsStreaming(false);
 
       // 完全な応答を保存
       const assistantMessageData: Message = {
-        id: crypto.randomUUID(),
+        id: assistantMessageId,
         timestamp: Date.now(),
         role: 'assistant',
         content: fullResponse,
+        phase: currentPhase,
       };
 
       messageDispatch({
@@ -301,8 +288,14 @@ ${isLastSpeaker
       // 完全な応答を音声合成
       await speakText(fullResponse);
 
-      // 次の話者を設定
-      goToNextSpeaker();
+      const nextPhase = getNextPhase(currentPhase, userMessage);
+      if (nextPhase !== currentPhase) {
+        setCurrentPhase(nextPhase);
+      }
+
+      if (nextPhase === 'intro_reacting' || nextPhase === 'intro_next_person') {
+        goToNextSpeaker();
+      }
 
     } catch (error) {
       console.error('Error generating response:', error);
@@ -310,9 +303,8 @@ ${isLastSpeaker
     } finally {
       setIsLoading(false);
     }
-  }, [userMessage, isLoading, genAI, members, speakerIndex, speakText, goToNextSpeaker]);
+  }, [userMessage, isLoading, genAI, messageState.messages, currentPhase, speakText, goToNextSpeaker]);
 
-  // 初期メッセージの設定
   useEffect(() => {
     if (members.length > 0 && messageState.messages.length === 0) {
       const openingMessage: Message = {
@@ -320,6 +312,7 @@ ${isLastSpeaker
         role: 'assistant',
         content: INITIAL_MESSAGE,
         timestamp: Date.now(),
+        phase: 'intro_start',
       };
       messageDispatch({ type: 'ADD_MESSAGE', message: openingMessage });
       speakText(INITIAL_MESSAGE);
@@ -407,31 +400,38 @@ ${isLastSpeaker
           </div>
         )}
         <div className="space-y-4 mb-4 max-h-[60vh] overflow-y-auto">
-          {messageState.messages.map((message) => (
-            <div key={message.id} className="relative">
-              <div className={`rounded-2xl p-4 shadow-lg max-w-[80%] ${
-                message.role === 'assistant' 
-                  ? 'bg-blue-100' 
-                  : 'bg-white/90 backdrop-blur-sm ml-auto'
-              }`}>
-                <p className="text-gray-800">
-                  {message.content}
-                </p>
-                <div className="text-xs text-gray-500 mt-1">
-                  {new Date(message.timestamp).toLocaleTimeString()}
-                </div>
-                <div className={`absolute bottom-0 ${
-                  message.role === 'assistant' 
-                    ? 'left-0 -translate-x-1/2' 
-                    : 'right-0 translate-x-1/2'
-                } w-4 h-4 transform translate-y-1/2 rotate-45 ${
+          {useMemo(() => 
+            messageState.messages.map((message) => (
+              <div key={message.id} className="relative">
+                <div className={`rounded-2xl p-4 shadow-lg max-w-[80%] ${
                   message.role === 'assistant' 
                     ? 'bg-blue-100' 
-                    : 'bg-white/90'
-                }`}></div>
+                    : 'bg-white/90 backdrop-blur-sm ml-auto'
+                }`}>
+                  <p className="text-gray-800">
+                    {message.content}
+                  </p>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {new Date(message.timestamp).toLocaleTimeString()}
+                    {message.phase && (
+                      <span className="ml-2 text-xs text-blue-600">
+                        [{message.phase}]
+                      </span>
+                    )}
+                  </div>
+                  <div className={`absolute bottom-0 ${
+                    message.role === 'assistant' 
+                      ? 'left-0 -translate-x-1/2' 
+                      : 'right-0 translate-x-1/2'
+                  } w-4 h-4 transform translate-y-1/2 rotate-45 ${
+                    message.role === 'assistant' 
+                      ? 'bg-blue-100' 
+                      : 'bg-white/90'
+                  }`}></div>
+                </div>
               </div>
-            </div>
-          ))}
+            )), [messageState.messages]
+          )}
           {userMessage && (
             <div className="relative">
               <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-4 shadow-lg max-w-[80%] ml-auto">
@@ -442,7 +442,21 @@ ${isLastSpeaker
               </div>
             </div>
           )}
-          {isLoading && (
+          {isStreaming && streamingResponse && (
+            <div className="relative">
+              <div className="bg-blue-100 rounded-2xl p-4 shadow-lg max-w-[80%]">
+                <p className="text-gray-800">
+                  {streamingResponse}
+                  <span className="animate-pulse">|</span>
+                </p>
+                <div className="text-xs text-gray-500 mt-1">
+                  リアルタイム応答中...
+                </div>
+                <div className="absolute bottom-0 left-0 w-4 h-4 transform -translate-x-1/2 translate-y-1/2 rotate-45 bg-blue-100"></div>
+              </div>
+            </div>
+          )}
+          {isLoading && !isStreaming && (
             <div className="relative">
               <div className="bg-blue-100 rounded-2xl p-4 shadow-lg max-w-[80%]">
                 <p className="text-gray-800">
