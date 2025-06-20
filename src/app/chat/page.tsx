@@ -6,8 +6,6 @@ import { useState, useEffect, useCallback, useRef, useReducer, useMemo } from "r
 import superagent from 'superagent';
 import { useTeam } from '@/contexts/TeamContext';
 import { useRouter } from 'next/navigation';
-import { Message } from '@/lib/types';
-import { getPhaseInstruction, getNextPhase, generatePrompt } from '@/lib/prompts';
 
 // Web Speech APIの型定義
 interface GoogleGenerativeAI {
@@ -67,7 +65,16 @@ declare global {
   }
 }
 
+// 初期メッセージの定義
+const INITIAL_MESSAGE = `わて、ずんだもんて言いますねん。ずんだもんって言うても、枝豆ちゃうで？ ここのMC、言うたら「関西のおばちゃん」担当させてもろてます。初めましての人も、そうでない人も、今日はせっかくやから、みんなでワイワイ、楽しい時間にしたいと思てますねん。「会議」って言うと、ちょっと肩肘張る感じするやん？ でも、堅苦しいのはなしなし！ ここにおるん、みんな仲間やからね。今日は、普段言いたくても言われへんこととか、聞いてみたいこととか、遠慮なくバンバン出してくれたらええからね。さあ、せっかくやから、まずはみんなの「今日ここに来るまでになんか面白いことあった？」とか、他愛もない話でも聞かせてくれへん？ なんでもええで、ほんま！ あっ、ちなみにわては、今朝、うちの旦那が靴下裏返しで履いてて、思わずツッコんでしもたわ〜！ もう、しゃーない男やで、ほんま。ほな、自己紹介はわてから見て、右側の一番近い方から時計回りでお願いしよか。じゃあ、まずはそちらの方から、よろしゅう頼んます！`;
 
+// メッセージの型定義
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
 
 // メッセージの初期状態
 const initialMessageState = {
@@ -88,7 +95,7 @@ function messageReducer(state: typeof initialMessageState, action: { type: strin
 }
 
 export default function ChatPage() {
-  const { members, currentPhase, goToNextSpeaker, setCurrentPhase } = useTeam();
+  const { members } = useTeam();
   const router = useRouter();
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -96,11 +103,10 @@ export default function ChatPage() {
   const [error, setError] = useState('');
   const [userMessage, setUserMessage] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const [speakerIndex, setSpeakerIndex] = useState(0);
   const [messageState, messageDispatch] = useReducer(messageReducer, initialMessageState);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [genAI, setGenAI] = useState<GoogleGenerativeAI | null>(null);
-  const [streamingResponse, setStreamingResponse] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
 
   // Gemini APIの初期化（遅延読み込み）
   useEffect(() => {
@@ -129,7 +135,10 @@ export default function ChatPage() {
     }
   }, [members, router]);
 
-
+  // 次の話者に移る関数
+  const goToNextSpeaker = useCallback(() => {
+    setSpeakerIndex(prev => prev + 1);
+  }, []);
 
   // 音声合成
   const speakText = useCallback(async (text: string) => {
@@ -230,7 +239,6 @@ export default function ChatPage() {
         timestamp: Date.now(),
         role: 'user',
         content: userMessage,
-        phase: currentPhase,
       };
 
       messageDispatch({
@@ -240,8 +248,25 @@ export default function ChatPage() {
 
       setUserMessage('');
 
-      // フェーズに基づいてプロンプトを生成
-      const prompt = generatePrompt(messageState.messages, currentPhase);
+      // 現在の話者に基づいてプロンプトを生成
+      const currentSpeaker = members[speakerIndex];
+      const nextSpeakerIndex = speakerIndex + 1;
+      const isLastSpeaker = nextSpeakerIndex >= members.length;
+      
+      const prompt = [
+        {
+          role: 'user',
+          parts: [{ text: `あなたは、会議の冒頭で初対面の人同士の緊張をほぐし、積極的な話し合いを促す、明るくて世話焼きな「関西のおばちゃんMC」です。
+${currentSpeaker.name}さんの自己紹介にリアクションしてください。
+友好的でユーモラスな口調で、参加者全員が楽しめるように会話を進めてください。
+常にグループの一員として、積極的に会話に参加し、他のメンバーの発言にも気さくにツッコミを入れたり、質問を投げかけたり、共通点を見つけて繋げたりして、全員を巻き込んでください。
+
+${isLastSpeaker 
+  ? '全員の自己紹介が終わったので、次のアイスブレイクコーナーに移ることを宣言してください。'
+  : `次は${members[nextSpeakerIndex].name}さんに自己紹介をお願いすることを伝えてください。`
+}` }]
+        }
+      ];
 
       const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-preview-05-20" });
       const result = await model.generateContentStream({
@@ -254,27 +279,18 @@ export default function ChatPage() {
         },
       });
 
-      setIsStreaming(true);
-      setStreamingResponse('');
-
-      const assistantMessageId = crypto.randomUUID();
       let fullResponse = '';
-
       for await (const chunk of result.stream) {
         const chunkText = chunk.text();
         fullResponse += chunkText;
-        setStreamingResponse(fullResponse);
       }
-
-      setIsStreaming(false);
 
       // 完全な応答を保存
       const assistantMessageData: Message = {
-        id: assistantMessageId,
+        id: crypto.randomUUID(),
         timestamp: Date.now(),
         role: 'assistant',
         content: fullResponse,
-        phase: currentPhase,
       };
 
       messageDispatch({
@@ -285,15 +301,8 @@ export default function ChatPage() {
       // 完全な応答を音声合成
       await speakText(fullResponse);
 
-      const nextPhase = getNextPhase(currentPhase, userMessage);
-      if (nextPhase !== currentPhase) {
-        setCurrentPhase(nextPhase);
-      }
-
-      // 次の話者を設定（フェーズに応じて）
-      if (nextPhase === 'intro_reacting' || nextPhase === 'intro_next_person') {
-        goToNextSpeaker();
-      }
+      // 次の話者を設定
+      goToNextSpeaker();
 
     } catch (error) {
       console.error('Error generating response:', error);
@@ -301,23 +310,33 @@ export default function ChatPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [userMessage, isLoading, genAI, messageState.messages, currentPhase, speakText, goToNextSpeaker, setCurrentPhase]);
+  }, [userMessage, isLoading, genAI, members, speakerIndex, speakText, goToNextSpeaker]);
 
-  // フェーズに基づく初期メッセージの設定
+  const [openingMessage, setOpeningMessage] = useState<Message>();
+  // 初期メッセージの設定
   useEffect(() => {
-    if (members.length > 0 && messageState.messages.length === 0) {
-      const openingText = getPhaseInstruction(currentPhase);
-      const openingMessage: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: openingText,
-        timestamp: Date.now(),
-        phase: currentPhase,
-      };
-      messageDispatch({ type: 'ADD_MESSAGE', message: openingMessage });
-      speakText(openingText);
+    // membersが空配列でなければ初期化済みとみなす
+    const hasInitialMessage = messageState.messages.some(message => message.content === INITIAL_MESSAGE);
+    if (
+      members.length > 0 &&
+      (messageState.messages.length === 0 && !hasInitialMessage)
+    ) {
+      setOpeningMessage(
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: INITIAL_MESSAGE,
+          timestamp: Date.now(),});
     }
-  }, [members, messageState.messages, speakText, currentPhase]);
+  }, [members, messageState.messages]);
+
+  useEffect(() => {
+    if (openingMessage) {
+      messageDispatch({ type: 'ADD_MESSAGE', message: openingMessage });
+      console.log('initial message', INITIAL_MESSAGE);
+      speakText(INITIAL_MESSAGE);
+    }
+  }, [openingMessage, speakText]);
 
   // 音声認識の設定
   useEffect(() => {
@@ -409,7 +428,7 @@ export default function ChatPage() {
         )}
         <div className="space-y-4 mb-4 max-h-[60vh] overflow-y-auto">
           {useMemo(() => 
-            messageState.messages.map((message) => (
+            openingMessage && messageState.messages.map((message) => (
               <div key={message.id} className="relative">
                 <div className={`rounded-2xl p-4 shadow-lg max-w-[80%] ${
                   message.role === 'assistant' 
@@ -421,11 +440,6 @@ export default function ChatPage() {
                   </p>
                   <div className="text-xs text-gray-500 mt-1">
                     {new Date(message.timestamp).toLocaleTimeString()}
-                    {message.phase && (
-                      <span className="ml-2 text-xs text-blue-600">
-                        [{message.phase}]
-                      </span>
-                    )}
                   </div>
                   <div className={`absolute bottom-0 ${
                     message.role === 'assistant' 
@@ -438,7 +452,7 @@ export default function ChatPage() {
                   }`}></div>
                 </div>
               </div>
-            )), [messageState.messages]
+            )), [openingMessage, messageState.messages]
           )}
           {userMessage && (
             <div className="relative">
@@ -450,21 +464,7 @@ export default function ChatPage() {
               </div>
             </div>
           )}
-          {isStreaming && streamingResponse && (
-            <div className="relative">
-              <div className="bg-blue-100 rounded-2xl p-4 shadow-lg max-w-[80%]">
-                <p className="text-gray-800">
-                  {streamingResponse}
-                  <span className="animate-pulse">|</span>
-                </p>
-                <div className="text-xs text-gray-500 mt-1">
-                  リアルタイム応答中...
-                </div>
-                <div className="absolute bottom-0 left-0 w-4 h-4 transform -translate-x-1/2 translate-y-1/2 rotate-45 bg-blue-100"></div>
-              </div>
-            </div>
-          )}
-          {isLoading && !isStreaming && (
+          {isLoading && (
             <div className="relative">
               <div className="bg-blue-100 rounded-2xl p-4 shadow-lg max-w-[80%]">
                 <p className="text-gray-800">
@@ -498,4 +498,4 @@ export default function ChatPage() {
       <audio ref={audioRef} className="hidden" />
     </div>
   );
-}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+}                                                                                                                        
