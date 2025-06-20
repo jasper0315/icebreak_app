@@ -1,7 +1,7 @@
 'use client';
 
 import Image from "next/image";
-import { useState, useEffect, useCallback, useRef, useReducer } from "react";
+import { useState, useEffect, useCallback, useRef, useReducer, useMemo } from "react";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import superagent from 'superagent';
 import { useTeam } from '@/contexts/TeamContext';
@@ -110,82 +110,16 @@ export default function ChatPage() {
     }
   }, [members, router]);
 
-  const [openingMessage, setOpeningMessage] = useState<Message>();
-  // 初期メッセージの設定
-  useEffect(() => {
-    // membersが空配列でなければ初期化済みとみなす
-    const hasInitialMessage = messageState.messages.some(message => message.content === INITIAL_MESSAGE);
-    if (
-      members.length > 0 &&
-      (messageState.messages.length === 0 && !hasInitialMessage)
-    ) {
-      setOpeningMessage(
-        {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: INITIAL_MESSAGE,
-          timestamp: Date.now(),});
-    }
-  }, [members]);
-
-  useEffect(() => {
-    if (openingMessage) {
-      messageDispatch({ type: 'ADD_MESSAGE', message: openingMessage });
-      console.log('initial message', INITIAL_MESSAGE);
-      speakText(INITIAL_MESSAGE);
-    }
-  }, [openingMessage]);
-
-  // 音声認識の設定
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'ja-JP';
-
-        recognition.onresult = (event: SpeechRecognitionEvent) => {
-          const transcript = Array.from(event.results)
-            .map(result => result[0].transcript)
-            .join('');
-
-          if (event.results[0].isFinal) {
-            setUserMessage(transcript);
-          }
-        };
-
-        recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-          console.error('Speech recognition error:', event.error);
-          setError('音声認識中にエラーが発生しました。');
-          setIsListening(false);
-        };
-
-        recognitionRef.current = recognition;
-      }
-    }
+  // 次の話者に移る関数
+  const goToNextSpeaker = useCallback(() => {
+    setSpeakerIndex(prev => prev + 1);
   }, []);
 
-  // 音声認識の開始/停止
-  const toggleListening = () => {
-    if (!recognitionRef.current) {
-      setError('お使いのブラウザは音声認識に対応していません。');
-      return;
-    }
-
-    if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-    } else {
-      recognitionRef.current.start();
-      setIsListening(true);
-    }
-  };
-
   // 音声合成
-const speakText = async (text: string) => {
+  const speakText = useCallback(async (text: string) => {
     if (!text) return;
+
+    const audioObjects: { audio: HTMLAudioElement; url: string }[] = [];
 
     try {
       setIsSpeaking(true);
@@ -210,6 +144,8 @@ const speakText = async (text: string) => {
             const audio = new Audio();
             const audioUrl = URL.createObjectURL(response.body);
             audio.src = audioUrl;
+
+            audioObjects.push({ audio, url: audioUrl });
 
             // 再生開始
             const playPromise = audio.play();
@@ -255,12 +191,17 @@ const speakText = async (text: string) => {
         setError('音声の生成中にエラーが発生しました');
       }
     } finally {
+      audioObjects.forEach(({ audio, url }) => {
+        audio.pause();
+        audio.src = '';
+        URL.revokeObjectURL(url);
+      });
       setIsSpeaking(false);
     }
-  };
+  }, []);
 
   // メッセージ送信処理
-  const sendMessage = async () => {
+  const sendMessage = useCallback(async () => {
     if (!userMessage.trim() || isLoading || !genAI) return;
 
     try {
@@ -344,20 +285,106 @@ ${isLastSpeaker
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [userMessage, isLoading, genAI, members, speakerIndex, speakText, goToNextSpeaker]);
 
-  const stopSpeaking = () => {
+  const [openingMessage, setOpeningMessage] = useState<Message>();
+  // 初期メッセージの設定
+  useEffect(() => {
+    // membersが空配列でなければ初期化済みとみなす
+    const hasInitialMessage = messageState.messages.some(message => message.content === INITIAL_MESSAGE);
+    if (
+      members.length > 0 &&
+      (messageState.messages.length === 0 && !hasInitialMessage)
+    ) {
+      setOpeningMessage(
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: INITIAL_MESSAGE,
+          timestamp: Date.now(),});
+    }
+  }, [members, messageState.messages]);
+
+  useEffect(() => {
+    if (openingMessage) {
+      messageDispatch({ type: 'ADD_MESSAGE', message: openingMessage });
+      console.log('initial message', INITIAL_MESSAGE);
+      speakText(INITIAL_MESSAGE);
+    }
+  }, [openingMessage, speakText]);
+
+  // 音声認識の設定
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'ja-JP';
+
+        recognition.onresult = (event: SpeechRecognitionEvent) => {
+          const transcript = Array.from(event.results)
+            .map(result => result[0].transcript)
+            .join('');
+
+          if (event.results[0].isFinal) {
+            setUserMessage(transcript);
+            setTimeout(() => {
+              sendMessage();
+            }, 500);
+          }
+        };
+
+        recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+          console.error('Speech recognition error:', event.error);
+          setError('音声認識中にエラーが発生しました。');
+          setIsListening(false);
+        };
+
+        recognitionRef.current = recognition;
+
+        return () => {
+          if (recognitionRef.current) {
+            recognitionRef.current.stop();
+            recognitionRef.current = null;
+          }
+        };
+      }
+    }
+  }, [sendMessage]);
+
+  // 音声認識の開始/停止
+  const toggleListening = useCallback(() => {
+    if (!recognitionRef.current) {
+      setError('お使いのブラウザは音声認識に対応していません。');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      recognitionRef.current.start();
+      setIsListening(true);
+    }
+  }, [isListening]);
+
+
+
+
+
+
+
+  const stopSpeaking = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
       setIsSpeaking(false);
     }
-  };
+  }, []);
 
-  // 次の話者に移る関数
-  const goToNextSpeaker = () => {
-    setSpeakerIndex(prev => prev + 1);
-  };
+
 
   return (
     <div className="relative w-screen h-screen">
@@ -375,31 +402,33 @@ ${isLastSpeaker
           </div>
         )}
         <div className="space-y-4 mb-4 max-h-[60vh] overflow-y-auto">
-          {openingMessage && messageState.messages.map((message) => (
-            <div key={message.id} className="relative">
-              <div className={`rounded-2xl p-4 shadow-lg max-w-[80%] ${
-                message.role === 'assistant' 
-                  ? 'bg-blue-100' 
-                  : 'bg-white/90 backdrop-blur-sm ml-auto'
-              }`}>
-                <p className="text-gray-800">
-                  {message.content}
-                </p>
-                <div className="text-xs text-gray-500 mt-1">
-                  {new Date(message.timestamp).toLocaleTimeString()}
-                </div>
-                <div className={`absolute bottom-0 ${
-                  message.role === 'assistant' 
-                    ? 'left-0 -translate-x-1/2' 
-                    : 'right-0 translate-x-1/2'
-                } w-4 h-4 transform translate-y-1/2 rotate-45 ${
+          {useMemo(() => 
+            openingMessage && messageState.messages.map((message) => (
+              <div key={message.id} className="relative">
+                <div className={`rounded-2xl p-4 shadow-lg max-w-[80%] ${
                   message.role === 'assistant' 
                     ? 'bg-blue-100' 
-                    : 'bg-white/90'
-                }`}></div>
+                    : 'bg-white/90 backdrop-blur-sm ml-auto'
+                }`}>
+                  <p className="text-gray-800">
+                    {message.content}
+                  </p>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {new Date(message.timestamp).toLocaleTimeString()}
+                  </div>
+                  <div className={`absolute bottom-0 ${
+                    message.role === 'assistant' 
+                      ? 'left-0 -translate-x-1/2' 
+                      : 'right-0 translate-x-1/2'
+                  } w-4 h-4 transform translate-y-1/2 rotate-45 ${
+                    message.role === 'assistant' 
+                      ? 'bg-blue-100' 
+                      : 'bg-white/90'
+                  }`}></div>
+                </div>
               </div>
-            </div>
-          ))}
+            )), [openingMessage, messageState.messages]
+          )}
           {userMessage && (
             <div className="relative">
               <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-4 shadow-lg max-w-[80%] ml-auto">
@@ -444,4 +473,4 @@ ${isLastSpeaker
       <audio ref={audioRef} className="hidden" />
     </div>
   );
-} 
+}                                                            

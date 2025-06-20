@@ -32,7 +32,7 @@ const getEnvConfig = (): EnvConfig => {
 
   // 環境変数の検証
   const missingVars = Object.entries(config)
-    .filter(([_, value]) => !value)
+    .filter(([, value]) => !value)
     .map(([key]) => key);
 
   if (missingVars.length > 0) {
@@ -252,4 +252,4 @@ export async function endConversation(conversationId: string): Promise<void> {
     });
     throw new Error(`会話の終了に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
   }
-} 
+}  
