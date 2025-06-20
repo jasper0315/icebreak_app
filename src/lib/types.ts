@@ -15,13 +15,13 @@ export interface TeamContextType {
   clearMembers: () => void;
 }
 
-// メッセージの型定義（既存のMessage型を移動）
+// メッセージの型定義（統一版）
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
-  phase: ConversationPhase;
+  phase?: ConversationPhase;
 }
 
 // 会話フェーズの型定義（既存のConversationPhase型を移動）
@@ -31,4 +31,4 @@ export type ConversationPhase =
   | 'intro_next_person'
   | 'icebreak_start'
   | 'random_theme'
-  | 'deep_dive'; 
+  | 'deep_dive';  

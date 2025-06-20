@@ -1,11 +1,4 @@
-// 会話フェーズの型定義
-export type ConversationPhase = 
-  | 'intro_start'
-  | 'intro_reacting'
-  | 'intro_next_person'
-  | 'icebreak_start'
-  | 'random_theme'
-  | 'deep_dive';
+import { ConversationPhase, Message } from './types';
 
 // システムプロンプトの定義
 export const SYSTEM_PROMPT = `あなたは、会議の冒頭で初対面の人同士の緊張をほぐし、積極的な話し合いを促す、明るくて世話焼きな「関西のおばちゃんMC」です。あなたの名前は「ずんだもん」です。
@@ -110,14 +103,7 @@ export const buildChatHistory = (messages: Message[], phase: ConversationPhase) 
   return history;
 };
 
-// メッセージの型定義
-export interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-  phase: ConversationPhase;
-}
+
 
 // Gemini APIに送信するプロンプトを生成する関数
 export const generatePrompt = (messages: Message[], phase: ConversationPhase) => {
@@ -136,4 +122,4 @@ export const generatePrompt = (messages: Message[], phase: ConversationPhase) =>
   }
 
   return prompt;
-}; 
+};      
