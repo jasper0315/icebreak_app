@@ -109,16 +109,17 @@ export default function ChatPage() {
   useEffect(() => {
     const initializeGeminiAI = async () => {
       if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
-        setError('Gemini API key is not set');
+        setError('Gemini API key is not configured. Please create a .env.local file with NEXT_PUBLIC_GEMINI_API_KEY to enable AI conversation features. See .env.local.example for setup instructions.');
         return;
       }
 
       try {
         const { GoogleGenerativeAI } = await import("@google/generative-ai");
         setGenAI(new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY));
+        setError('');
       } catch (error) {
         console.error('Failed to load GoogleGenerativeAI:', error);
-        setError('AI機能の読み込みに失敗しました');
+        setError('AI機能の読み込みに失敗しました。ネットワーク接続を確認してください。');
       }
     };
 
@@ -187,6 +188,9 @@ export default function ChatPage() {
             // エラー時の処理
             utterance.onerror = (event) => {
               console.error('Speech synthesis error:', event.error);
+              if (event.error === 'not-allowed') {
+                console.warn('Speech synthesis not allowed. User may need to interact with page first.');
+              }
               reject(new Error(`音声合成エラー: ${event.error}`));
             };
 
@@ -194,11 +198,6 @@ export default function ChatPage() {
           });
         } catch (error) {
           console.error('Error processing sentence:', sentence, error);
-          if (error instanceof Error) {
-            setError(`音声の生成中にエラーが発生しました: ${error.message}`);
-          } else {
-            setError('音声の生成中にエラーが発生しました');
-          }
           // 個別の文の処理に失敗しても、全体の処理は継続
           continue;
         }
@@ -217,7 +216,40 @@ export default function ChatPage() {
 
   // メッセージ送信処理
   const sendMessage = useCallback(async () => {
-    if (!userMessage.trim() || isLoading || !genAI) return;
+    if (!userMessage.trim() || isLoading) return;
+
+    if (!genAI) {
+      setError('AI機能が利用できません。Gemini API keyが設定されていることを確認してください。');
+      
+      const userMessageData: Message = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        role: 'user',
+        content: userMessage,
+        phase: currentPhase,
+      };
+
+      messageDispatch({
+        type: 'ADD_MESSAGE',
+        message: userMessageData,
+      });
+
+      const fallbackResponse: Message = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        role: 'assistant',
+        content: 'すみません、AI機能が現在利用できません。管理者にGemini API keyの設定を確認してもらってください。',
+        phase: currentPhase,
+      };
+
+      messageDispatch({
+        type: 'ADD_MESSAGE',
+        message: fallbackResponse,
+      });
+
+      setUserMessage('');
+      return;
+    }
 
     try {
       setIsLoading(true);

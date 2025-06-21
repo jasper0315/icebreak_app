@@ -1,4 +1,27 @@
+# Icebreak App
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+
+## Environment Setup
+
+1. Copy the example environment file:
+   ```bash
+   cp .env.local.example .env.local
+   ```
+
+2. Configure your Gemini API key:
+   - Get your API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+   - Add it to `.env.local`:
+     ```
+     NEXT_PUBLIC_GEMINI_API_KEY=your_actual_api_key_here
+     ```
+
+3. (Optional) Configure AWS credentials for database features:
+   ```
+   AWS_REGION=ap-northeast-1
+   AWS_ACCESS_KEY_ID=your_aws_access_key
+   AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+   ```
 
 ## Getting Started
 
