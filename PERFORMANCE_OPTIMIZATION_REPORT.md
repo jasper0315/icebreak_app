@@ -85,20 +85,20 @@ useEffect(() => {
 
 ### 3. API Call Inefficiencies (MEDIUM PRIORITY)
 
-#### 3.1 Sequential TTS API Calls
+#### 3.1 Sequential Speech Synthesis
 **File:** `src/app/chat/page.tsx`
-**Lines:** 200-249
-**Impact:** Medium - Slower speech synthesis
-**Issue:** TTS API calls are made sequentially for each sentence instead of potential batching.
+**Lines:** 150-200
+**Impact:** Medium - Sequential sentence processing
+**Issue:** Speech synthesis processes sentences sequentially using Web Speech API, which is appropriate for conversational flow.
 
-**Solution:** Consider batching or parallel processing where appropriate.
+**Solution:** Current implementation is optimal for maintaining natural conversation pace.
 
-#### 3.2 No Caching for TTS Requests
-**File:** `src/app/api/tts/route.ts`
-**Impact:** Low - Repeated API calls for same text
-**Issue:** No caching mechanism for repeated TTS requests.
+#### 3.2 Web Speech API Voice Loading
+**File:** `src/app/chat/page.tsx`
+**Impact:** Low - Voice loading optimization
+**Issue:** Voices are loaded asynchronously and may require waiting for voiceschanged event.
 
-**Solution:** Implement caching layer for TTS responses.
+**Solution:** Implemented waitForVoices() function to handle async voice loading properly.
 
 #### 3.3 DynamoDB Connection Verification on Every Request
 **File:** `src/lib/database.ts`
@@ -160,7 +160,7 @@ useEffect(() => {
 - **React Performance Issues (HIGH PRIORITY)**: Implemented useCallback for event handlers, useMemo for expensive computations, and proper audio cleanup
 - **State Management Issues (MEDIUM PRIORITY)**: Added debounced localStorage operations to reduce main thread blocking
 - **Database Connection Optimization (MEDIUM PRIORITY)**: Implemented connection pooling with cached verification to eliminate redundant DynamoDB connection checks
-- **TTS Caching (MEDIUM PRIORITY)**: Added in-memory LRU cache for TTS responses and VOICEVOX connection status
+- **Speech Synthesis Migration (MEDIUM PRIORITY)**: Migrated from VOICEVOX to Web Speech API for browser-native speech synthesis
 - **Bundle Size Optimization (LOW PRIORITY)**: Implemented lazy loading for GoogleGenerativeAI to reduce initial bundle size
 
 ### Performance Improvements Achieved
@@ -168,7 +168,7 @@ useEffect(() => {
 - **Memory Leak Fixes**: Eliminated memory growth from audio objects
 - **localStorage Debouncing**: 50-70% reduction in main thread blocking
 - **Database Connection**: Eliminated redundant connection verification on every request
-- **TTS Caching**: Reduced API calls for repeated text synthesis
+- **Speech Synthesis**: Eliminated external VOICEVOX dependency, using browser-native Web Speech API
 - **Bundle Size**: Reduced initial JavaScript bundle size through lazy loading
 
 ## Conclusion

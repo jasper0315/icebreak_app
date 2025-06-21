@@ -31,4 +31,40 @@ export interface SpeechRecognition extends EventTarget {
   stop(): void;
   onresult: (event: SpeechRecognitionEvent) => void;
   onerror: (event: SpeechRecognitionEvent) => void;
-}  
+}
+
+export interface SpeechSynthesisUtterance extends EventTarget {
+  text: string;
+  lang: string;
+  voice: SpeechSynthesisVoice | null;
+  volume: number;
+  rate: number;
+  pitch: number;
+  onstart: ((event: SpeechSynthesisEvent) => void) | null;
+  onend: ((event: SpeechSynthesisEvent) => void) | null;
+  onerror: ((event: SpeechSynthesisErrorEvent) => void) | null;
+  onpause: ((event: SpeechSynthesisEvent) => void) | null;
+  onresume: ((event: SpeechSynthesisEvent) => void) | null;
+  onmark: ((event: SpeechSynthesisEvent) => void) | null;
+  onboundary: ((event: SpeechSynthesisEvent) => void) | null;
+}
+
+export interface SpeechSynthesisVoice {
+  voiceURI: string;
+  name: string;
+  lang: string;
+  localService: boolean;
+  default: boolean;
+}
+
+export interface SpeechSynthesisEvent extends Event {
+  utterance: SpeechSynthesisUtterance;
+  charIndex: number;
+  charLength: number;
+  elapsedTime: number;
+  name: string;
+}
+
+export interface SpeechSynthesisErrorEvent extends SpeechSynthesisEvent {
+  error: string;
+}    
