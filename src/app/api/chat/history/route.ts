@@ -9,6 +9,8 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import { ConversationPhase } from '@/lib/types';
 
+export const runtime = 'edge';
+
 // DynamoDBクライアントの初期化
 const client = new DynamoDBClient({
   region: process.env.AWS_REGION,
