@@ -3,7 +3,6 @@
 import Image from "next/image";
 import { useState, useEffect, useCallback, useRef, useReducer, useMemo } from "react";
 
-import superagent from 'superagent';
 import { useTeam } from '@/contexts/TeamContext';
 import { useRouter } from 'next/navigation';
 import { Message, ConversationPhase } from '@/lib/types';
@@ -101,7 +100,6 @@ export default function ChatPage() {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   const [messageState, messageDispatch] = useReducer(messageReducer, initialMessageState);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [genAI, setGenAI] = useState<GoogleGenerativeAI | null>(null);
   const [currentPhase, setCurrentPhase] = useState<ConversationPhase>('intro_start');
   const [streamingResponse, setStreamingResponse] = useState('');
@@ -140,8 +138,6 @@ export default function ChatPage() {
   const speakText = useCallback(async (text: string) => {
     if (!text) return;
 
-    const audioObjects: { audio: HTMLAudioElement; url: string }[] = [];
-
     try {
       setIsSpeaking(true);
 
@@ -151,47 +147,50 @@ export default function ChatPage() {
         .map(s => s.trim())
         .filter(s => s !== '');
 
+      const waitForVoices = () => {
+        return new Promise<SpeechSynthesisVoice[]>((resolve) => {
+          const voices = speechSynthesis.getVoices();
+          if (voices.length > 0) {
+            resolve(voices);
+          } else {
+            speechSynthesis.addEventListener('voiceschanged', () => {
+              resolve(speechSynthesis.getVoices());
+            }, { once: true });
+          }
+        });
+      };
+
+      const voices = await waitForVoices();
+      const japaneseVoice = voices.find(voice => voice.lang.startsWith('ja')) || voices[0];
+
       // 各文を順番に処理
       for (const sentence of sentences) {
         try {
-          // 音声データの取得
-          const response = await superagent
-            .post('/api/tts')
-            .send({ text: sentence })
-            .responseType('blob');
-
-          // 音声の再生と完了待ち
+          // Web Speech API を使用した音声合成
           await new Promise<void>((resolve, reject) => {
-            const audio = new Audio();
-            const audioUrl = URL.createObjectURL(response.body);
-            audio.src = audioUrl;
+            const utterance = new SpeechSynthesisUtterance(sentence);
+            
+            utterance.lang = 'ja-JP';
+            utterance.rate = 0.9; // 少し遅めに設定
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
 
-            audioObjects.push({ audio, url: audioUrl });
-
-            // 再生開始
-            const playPromise = audio.play();
-            if (playPromise !== undefined) {
-              playPromise.catch(reject);
+            if (japaneseVoice) {
+              utterance.voice = japaneseVoice;
             }
 
             // 再生完了時の処理
-            const handleEnded = () => {
-              audio.removeEventListener('ended', handleEnded);
-              audio.removeEventListener('error', handleError);
-              URL.revokeObjectURL(audioUrl);
+            utterance.onend = () => {
               resolve();
             };
 
             // エラー時の処理
-            const handleError = (error: Event) => {
-              audio.removeEventListener('ended', handleEnded);
-              audio.removeEventListener('error', handleError);
-              URL.revokeObjectURL(audioUrl);
-              reject(error);
+            utterance.onerror = (event) => {
+              console.error('Speech synthesis error:', event.error);
+              reject(new Error(`音声合成エラー: ${event.error}`));
             };
 
-            audio.addEventListener('ended', handleEnded);
-            audio.addEventListener('error', handleError);
+            speechSynthesis.speak(utterance);
           });
         } catch (error) {
           console.error('Error processing sentence:', sentence, error);
@@ -212,11 +211,6 @@ export default function ChatPage() {
         setError('音声の生成中にエラーが発生しました');
       }
     } finally {
-      audioObjects.forEach(({ audio, url }) => {
-        audio.pause();
-        audio.src = '';
-        URL.revokeObjectURL(url);
-      });
       setIsSpeaking(false);
     }
   }, []);
@@ -377,9 +371,8 @@ export default function ChatPage() {
   }, [isListening]);
 
   const stopSpeaking = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
+    if (speechSynthesis.speaking) {
+      speechSynthesis.cancel();
       setIsSpeaking(false);
     }
   }, []);
@@ -487,7 +480,6 @@ export default function ChatPage() {
           )}
         </div>
       </div>
-      <audio ref={audioRef} className="hidden" />
     </div>
   );
 }
